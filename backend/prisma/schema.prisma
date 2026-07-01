@@ -1,0 +1,622 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================================
+// CORE / TENANCY / AUTH
+// ==========================================================
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  TEACHER
+  ACCOUNTANT
+  LIBRARIAN
+  STUDENT
+  PARENT
+  DRIVER
+  HR
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  logoUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  academicYears  AcademicYear[]
+  users          User[]
+  staff          Staff[]
+  books          Book[]
+  vehicles       Vehicle[]
+  hostels        Hostel[]
+  feeCategories  FeeCategory[]
+  subjects       Subject[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  schoolId     String
+  school       School   @relation(fields: [schoolId], references: [id])
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  student  Student?
+  guardian Guardian?
+  staff    Staff?
+
+  @@index([schoolId])
+}
+
+// ==========================================================
+// ACADEMIC STRUCTURE
+// ==========================================================
+
+model AcademicYear {
+  id        String   @id @default(uuid())
+  schoolId  String
+  school    School   @relation(fields: [schoolId], references: [id])
+  name      String // e.g. "2026-2027"
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean  @default(false)
+
+  classes              Class[]
+  admissionApplications AdmissionApplication[]
+  examTerms            ExamTerm[]
+  feeStructures        FeeStructure[]
+
+  @@index([schoolId])
+}
+
+model Class {
+  id             String       @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  name           String // e.g. "Grade 5"
+  numericLevel   Int
+
+  sections   Section[]
+  subjects   SubjectClass[]
+  feeStructures FeeStructure[]
+  admissionApplications AdmissionApplication[]
+
+  @@index([academicYearId])
+}
+
+model Section {
+  id            String  @id @default(uuid())
+  classId       String
+  class         Class   @relation(fields: [classId], references: [id])
+  name          String // e.g. "A"
+  capacity      Int     @default(40)
+  classTeacherId String?
+  classTeacher  Staff?  @relation(fields: [classTeacherId], references: [id])
+
+  students       Student[]
+  timetableSlots TimetableSlot[]
+  attendanceDays AttendanceRecord[]
+
+  @@index([classId])
+}
+
+model Subject {
+  id       String  @id @default(uuid())
+  schoolId String
+  school   School  @relation(fields: [schoolId], references: [id])
+  name     String
+  code     String?
+
+  classLinks     SubjectClass[]
+  timetableSlots TimetableSlot[]
+  examSubjects   ExamSubject[]
+  teacherLinks   StaffSubject[]
+
+  @@index([schoolId])
+}
+
+model SubjectClass {
+  id        String  @id @default(uuid())
+  classId   String
+  class     Class   @relation(fields: [classId], references: [id])
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id])
+
+  @@unique([classId, subjectId])
+}
+
+// ==========================================================
+// STUDENT & ADMISSION MANAGEMENT
+// ==========================================================
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  ALUMNI
+  TRANSFERRED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+model Student {
+  id            String        @id @default(uuid())
+  userId        String?       @unique
+  user          User?         @relation(fields: [userId], references: [id])
+  sectionId     String?
+  section       Section?      @relation(fields: [sectionId], references: [id])
+  admissionNo   String        @unique
+  firstName     String
+  lastName      String
+  dob           DateTime
+  gender        Gender
+  bloodGroup    String?
+  nationality   String?
+  photoUrl      String?
+  admissionDate DateTime      @default(now())
+  status        StudentStatus @default(ACTIVE)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  guardians          StudentGuardian[]
+  admissionApplication AdmissionApplication?
+  attendance         AttendanceEntry[]
+  examResults        ExamResult[]
+  feeInvoices        FeeInvoice[]
+  libraryLoans       LibraryLoan[]
+  hostelAllocation   HostelAllocation?
+  transportAllocation TransportAllocation?
+
+  @@index([sectionId])
+}
+
+model Guardian {
+  id        String   @id @default(uuid())
+  userId    String?  @unique
+  user      User?    @relation(fields: [userId], references: [id])
+  firstName String
+  lastName  String
+  relation  String // Father, Mother, Guardian
+  phone     String
+  email     String?
+  occupation String?
+  address   String?
+
+  students StudentGuardian[]
+}
+
+model StudentGuardian {
+  studentId  String
+  student    Student  @relation(fields: [studentId], references: [id])
+  guardianId String
+  guardian   Guardian @relation(fields: [guardianId], references: [id])
+  isPrimary  Boolean  @default(false)
+
+  @@id([studentId, guardianId])
+}
+
+enum ApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WAITLISTED
+}
+
+model AdmissionApplication {
+  id               String            @id @default(uuid())
+  academicYearId   String
+  academicYear     AcademicYear      @relation(fields: [academicYearId], references: [id])
+  applyingClassId  String
+  applyingClass    Class             @relation(fields: [applyingClassId], references: [id])
+  applicantName    String
+  dob              DateTime
+  gender           Gender
+  guardianName     String
+  guardianPhone    String
+  guardianEmail    String?
+  status           ApplicationStatus @default(PENDING)
+  applicationDate  DateTime          @default(now())
+  convertedStudentId String?         @unique
+  convertedStudent Student?          @relation(fields: [convertedStudentId], references: [id])
+
+  documents AdmissionDocument[]
+
+  @@index([academicYearId])
+}
+
+model AdmissionDocument {
+  id            String                @id @default(uuid())
+  applicationId String
+  application   AdmissionApplication  @relation(fields: [applicationId], references: [id])
+  docType       String // birth_certificate, prev_report_card, photo, id_proof
+  fileUrl       String
+  verified      Boolean               @default(false)
+  uploadedAt    DateTime              @default(now())
+}
+
+// ==========================================================
+// ATTENDANCE & TIMETABLE
+// ==========================================================
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+model TimetableSlot {
+  id        String    @id @default(uuid())
+  sectionId String
+  section   Section   @relation(fields: [sectionId], references: [id])
+  subjectId String
+  subject   Subject   @relation(fields: [subjectId], references: [id])
+  staffId   String
+  staff     Staff     @relation(fields: [staffId], references: [id])
+  dayOfWeek DayOfWeek
+  startTime String // "09:00"
+  endTime   String // "09:45"
+  room      String?
+
+  @@index([sectionId, dayOfWeek])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+model AttendanceRecord {
+  id        String   @id @default(uuid())
+  sectionId String
+  section   Section  @relation(fields: [sectionId], references: [id])
+  date      DateTime
+  takenById String
+  takenBy   Staff    @relation("AttendanceTakenBy", fields: [takenById], references: [id])
+  createdAt DateTime @default(now())
+
+  entries AttendanceEntry[]
+
+  @@unique([sectionId, date])
+}
+
+model AttendanceEntry {
+  id                 String           @id @default(uuid())
+  attendanceRecordId String
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id])
+  studentId          String
+  student            Student          @relation(fields: [studentId], references: [id])
+  status             AttendanceStatus
+  remarks            String?
+
+  @@unique([attendanceRecordId, studentId])
+}
+
+// ==========================================================
+// FEES & ACCOUNTING
+// ==========================================================
+
+model FeeCategory {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id])
+  name     String // Tuition, Transport, Library, Exam fee
+
+  structures FeeStructureItem[]
+}
+
+model FeeStructure {
+  id             String       @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  classId        String
+  class          Class        @relation(fields: [classId], references: [id])
+  name           String // "Grade 5 Annual Fee Plan"
+
+  items    FeeStructureItem[]
+  invoices FeeInvoice[]
+
+  @@index([academicYearId, classId])
+}
+
+model FeeStructureItem {
+  id             String       @id @default(uuid())
+  feeStructureId String
+  feeStructure   FeeStructure @relation(fields: [feeStructureId], references: [id])
+  feeCategoryId  String
+  feeCategory    FeeCategory  @relation(fields: [feeCategoryId], references: [id])
+  amount         Decimal      @db.Decimal(10, 2)
+  frequency      String // ONE_TIME, MONTHLY, QUARTERLY, ANNUAL
+}
+
+enum InvoiceStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model FeeInvoice {
+  id             String        @id @default(uuid())
+  studentId      String
+  student        Student       @relation(fields: [studentId], references: [id])
+  feeStructureId String
+  feeStructure   FeeStructure  @relation(fields: [feeStructureId], references: [id])
+  totalAmount    Decimal       @db.Decimal(10, 2)
+  dueDate        DateTime
+  status         InvoiceStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+
+  payments FeePayment[]
+
+  @@index([studentId])
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  UPI
+  ONLINE_GATEWAY
+}
+
+model FeePayment {
+  id        String        @id @default(uuid())
+  invoiceId String
+  invoice   FeeInvoice    @relation(fields: [invoiceId], references: [id])
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod
+  paidAt    DateTime      @default(now())
+  reference String? // transaction id / receipt no
+
+  @@index([invoiceId])
+}
+
+// ==========================================================
+// EXAMS & REPORT CARDS
+// ==========================================================
+
+model ExamTerm {
+  id             String       @id @default(uuid())
+  academicYearId String
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  name           String // "Mid Term", "Final Term"
+  startDate      DateTime
+  endDate        DateTime
+
+  examSubjects ExamSubject[]
+
+  @@index([academicYearId])
+}
+
+model ExamSubject {
+  id         String    @id @default(uuid())
+  examTermId String
+  examTerm   ExamTerm  @relation(fields: [examTermId], references: [id])
+  subjectId  String
+  subject    Subject   @relation(fields: [subjectId], references: [id])
+  examDate   DateTime?
+  maxMarks   Decimal   @db.Decimal(6, 2)
+  passMarks  Decimal   @db.Decimal(6, 2)
+
+  results ExamResult[]
+
+  @@index([examTermId])
+}
+
+model ExamResult {
+  id            String      @id @default(uuid())
+  examSubjectId String
+  examSubject   ExamSubject @relation(fields: [examSubjectId], references: [id])
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id])
+  marksObtained Decimal     @db.Decimal(6, 2)
+  grade         String?
+  remarks       String?
+
+  @@unique([examSubjectId, studentId])
+}
+
+// ==========================================================
+// STAFF / HR / PAYROLL
+// ==========================================================
+
+enum StaffType {
+  TEACHING
+  ADMIN
+  ACCOUNTANT
+  LIBRARIAN
+  DRIVER
+  SUPPORT
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+  RETIRED
+}
+
+model Staff {
+  id             String           @id @default(uuid())
+  userId         String?          @unique
+  user           User?            @relation(fields: [userId], references: [id])
+  schoolId       String
+  school         School           @relation(fields: [schoolId], references: [id])
+  employeeCode   String           @unique
+  firstName      String
+  lastName       String
+  staffType       StaffType
+  designation    String
+  dateOfJoining  DateTime
+  phone          String?
+  email          String?
+  employmentStatus EmploymentStatus @default(ACTIVE)
+
+  subjects       StaffSubject[]
+  classesTaught  Section[]
+  timetableSlots TimetableSlot[]
+  attendanceTaken AttendanceRecord[] @relation("AttendanceTakenBy")
+  payrollRecords PayrollRecord[]
+  vehicleAssignments Vehicle[]
+
+  @@index([schoolId])
+}
+
+model StaffSubject {
+  id        String  @id @default(uuid())
+  staffId   String
+  staff     Staff   @relation(fields: [staffId], references: [id])
+  subjectId String
+  subject   Subject @relation(fields: [subjectId], references: [id])
+
+  @@unique([staffId, subjectId])
+}
+
+enum PayrollStatus {
+  PENDING
+  PAID
+}
+
+model PayrollRecord {
+  id           String        @id @default(uuid())
+  staffId      String
+  staff        Staff         @relation(fields: [staffId], references: [id])
+  month        Int
+  year         Int
+  basicSalary  Decimal       @db.Decimal(10, 2)
+  allowances   Decimal       @db.Decimal(10, 2) @default(0)
+  deductions   Decimal       @db.Decimal(10, 2) @default(0)
+  netSalary    Decimal       @db.Decimal(10, 2)
+  status       PayrollStatus @default(PENDING)
+  paidAt       DateTime?
+
+  @@unique([staffId, month, year])
+}
+
+// ==========================================================
+// LIBRARY
+// ==========================================================
+
+model Book {
+  id            String  @id @default(uuid())
+  schoolId      String
+  school        School  @relation(fields: [schoolId], references: [id])
+  title         String
+  author        String?
+  isbn          String?
+  totalCopies   Int     @default(1)
+  availableCopies Int   @default(1)
+
+  loans LibraryLoan[]
+
+  @@index([schoolId])
+}
+
+enum LoanStatus {
+  ISSUED
+  RETURNED
+  OVERDUE
+  LOST
+}
+
+model LibraryLoan {
+  id         String     @id @default(uuid())
+  bookId     String
+  book       Book       @relation(fields: [bookId], references: [id])
+  studentId  String
+  student    Student    @relation(fields: [studentId], references: [id])
+  issuedAt   DateTime   @default(now())
+  dueDate    DateTime
+  returnedAt DateTime?
+  status     LoanStatus @default(ISSUED)
+
+  @@index([studentId])
+}
+
+// ==========================================================
+// TRANSPORT
+// ==========================================================
+
+model Vehicle {
+  id            String  @id @default(uuid())
+  schoolId      String
+  school        School  @relation(fields: [schoolId], references: [id])
+  registrationNo String @unique
+  capacity      Int
+  driverId      String?
+  driver        Staff?  @relation(fields: [driverId], references: [id])
+  routeName     String?
+
+  allocations TransportAllocation[]
+
+  @@index([schoolId])
+}
+
+model TransportAllocation {
+  id        String  @id @default(uuid())
+  studentId String  @unique
+  student   Student @relation(fields: [studentId], references: [id])
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
+  pickupPoint String?
+}
+
+// ==========================================================
+// HOSTEL
+// ==========================================================
+
+model Hostel {
+  id       String @id @default(uuid())
+  schoolId String
+  school   School @relation(fields: [schoolId], references: [id])
+  name     String
+  type     String // BOYS, GIRLS
+
+  rooms HostelRoom[]
+
+  @@index([schoolId])
+}
+
+model HostelRoom {
+  id       String @id @default(uuid())
+  hostelId String
+  hostel   Hostel @relation(fields: [hostelId], references: [id])
+  roomNo   String
+  capacity Int
+
+  allocations HostelAllocation[]
+
+  @@unique([hostelId, roomNo])
+}
+
+model HostelAllocation {
+  id        String     @id @default(uuid())
+  studentId String     @unique
+  student   Student    @relation(fields: [studentId], references: [id])
+  roomId    String
+  room      HostelRoom @relation(fields: [roomId], references: [id])
+  allocatedAt DateTime @default(now())
+}
